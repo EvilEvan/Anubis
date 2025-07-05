@@ -6,7 +6,8 @@ const axios = require('axios');
  * Gets the local network IP address and subnet to determine the scan range.
  * @returns {string|null} The base IP range to scan (e.g., '192.168.1.').
  */
-function getNetworkRange() {
+function getNetworkRanges() {
+    const ranges = [];
     const interfaces = os.networkInterfaces();
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
@@ -14,12 +15,17 @@ function getNetworkRange() {
             if (family === 'IPv4' && !internal) {
                 // Return the base network part of the IP address from the CIDR
                 const [ip, subnet] = cidr.split('/');
-                const ipParts = ip.split('.');
-                return `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.`;
+                if (parseInt(subnet) >= 24) { // Only scan /24 or larger subnets for efficiency
+                    const ipParts = ip.split('.');
+                    const range = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.`;
+                    if (!ranges.includes(range)) {
+                        ranges.push(range);
+                    }
+                }
             }
         }
     }
-    return null;
+    return ranges;
 }
 
 /**
@@ -197,21 +203,23 @@ async function discoverCameras() {
     console.log("🔍 ANUBIS GUARDIAN: Initiating camera discovery...");
     console.log("🌟 'These are the droids we're looking for' - searching for FNK Vision cameras");
     
-    const networkRange = getNetworkRange();
-    if (!networkRange) {
+    const networkRanges = getNetworkRanges();
+    if (!networkRanges || networkRanges.length === 0) {
         console.error("❌ Could not determine network range. Check network connection.");
         return [];
     }
 
-    console.log(`📡 Scanning network range: ${networkRange}1-254`);
+    console.log(`📡 Scanning network ranges: ${networkRanges.join(', ')}`);
     const cameraPorts = [554, 80, 8080, 8000]; // Common RTSP and HTTP ports
     const scanPromises = [];
 
     // Parallel port scanning - "The Clone Army approach"
-    for (let i = 1; i < 255; i++) {
-        const ip = `${networkRange}${i}`;
-        for (const port of cameraPorts) {
-            scanPromises.push(scanPort(ip, port));
+    for (const networkRange of networkRanges) {
+        for (let i = 1; i < 255; i++) {
+            const ip = `${networkRange}${i}`;
+            for (const port of cameraPorts) {
+                scanPromises.push(scanPort(ip, port));
+            }
         }
     }
 
